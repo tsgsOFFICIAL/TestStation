@@ -9,6 +9,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Webscraper", "Webscraper\We
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TTS", "TTS\TTS.csproj", "{4681EC12-9BC8-4D65-A7C6-49D7AE56E82A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConsoleApp1", "ConsoleApp1\ConsoleApp1.csproj", "{078EA207-FFAA-47BC-B76F-CC25293C255D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -27,6 +29,10 @@ Global
 		{4681EC12-9BC8-4D65-A7C6-49D7AE56E82A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4681EC12-9BC8-4D65-A7C6-49D7AE56E82A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4681EC12-9BC8-4D65-A7C6-49D7AE56E82A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{078EA207-FFAA-47BC-B76F-CC25293C255D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{078EA207-FFAA-47BC-B76F-CC25293C255D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{078EA207-FFAA-47BC-B76F-CC25293C255D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{078EA207-FFAA-47BC-B76F-CC25293C255D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
