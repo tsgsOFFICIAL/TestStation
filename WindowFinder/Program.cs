@@ -88,7 +88,7 @@ namespace WindowFinder
         #endregion
         private static void Main(string[] args)
         {
-            string windowToFind = args.Length == 1 ? args[0] : "notepad";
+            string windowToFind = args.Length == 1 ? args[0] : "csgo";
             try
             {
                 Screen activeScreen = FindApplication(windowToFind);
@@ -107,16 +107,24 @@ namespace WindowFinder
 
         private static Screen FindApplication(string name)
         {
-            // Find the first-in-Z-order
-            IntPtr hWnd = FindWindow(name, null);
+            try
+            {
+                // Find the first-in-Z-order
+                IntPtr hWnd = FindWindow(name, null);
 
-            // Get the handle to a dialog
-            if (hWnd == IntPtr.Zero)
-                hWnd = GetWindow(Process.GetProcessesByName(name).First().MainWindowHandle, GetWindowType.GW_HWNDFIRST);
+                // Get the handle to a dialog
+                if (hWnd == IntPtr.Zero)
+                    hWnd = GetWindow(Process.GetProcessesByName(name).First().MainWindowHandle, GetWindowType.GW_HWNDFIRST);
 
-            // If found, return it.
-            if (hWnd != IntPtr.Zero)
-                return Screen.FromHandle(hWnd);
+                // If found, return it.
+                if (hWnd != IntPtr.Zero)
+                    return Screen.FromHandle(hWnd);
+            }
+            catch (Exception)
+            {
+                return null;
+
+            }
 
             return null;
         }
