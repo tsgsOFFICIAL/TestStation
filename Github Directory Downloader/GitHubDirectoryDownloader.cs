@@ -9,105 +9,98 @@ namespace Github_Directory_Downloader
     public class GitHubDirectoryDownloader : IDisposable
     {
         private readonly HttpClient _httpClient;
-        private string _apiUrl;
-        private string _directoryPath;
-        private string _downloadDirectory;
+        private readonly string _repositoryOwner;
+        private readonly string _repositoryName;
+        private readonly string _folderPath;
+        private long _totalFileSize = 0;
+        private long _downloadedFileSize = 0;
+        private object _lockTotalSize = new object();
+        private object _lockDownloadedSize = new object();
+        private object _lockDownloadTasks = new object();
+        private object _lockSubfolderTasks = new object();
         private List<Task> _downloadTasks;
         private List<Task> _subfolderTasks;
-
-        /// <summary>
-        /// Occurs when the download progress changes.
-        /// </summary>
-        public event EventHandler<int>? ProgressChanged;
+        public event EventHandler<ProgressEventArgs>? ProgressUpdated;
+        public event EventHandler<bool>? DownloadCompleted;
 
         /// <summary>
         /// Initializes a new instance of the GitHubDirectoryDownloader class.
         /// </summary>
-        public GitHubDirectoryDownloader(string apiUrl, string directoryPath, string downloadDirectory)
+        /// <param name="repositoryOwner">Repository Owner</param>
+        /// <param name="repositoryName">Repository Name</param>
+        /// <param name="folderPath">Folder path in repository</param>
+        public GitHubDirectoryDownloader(string repositoryOwner, string repositoryName, string folderPath)
         {
             _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "GitHubDirectoryDownloader");
-            _apiUrl = apiUrl;
-            _directoryPath = directoryPath;
-            _downloadDirectory = downloadDirectory;
-            _downloadTasks = new();
-            _subfolderTasks = new();
+            _repositoryOwner = repositoryOwner;
+            _repositoryName = repositoryName;
+            _folderPath = folderPath;
+            _downloadTasks = new List<Task>();
+            _subfolderTasks = new List<Task>();
         }
 
         /// <summary>
-        /// Downloads the directory asynchronously.
+        /// Downloads a GitHub directory asynchronously
         /// </summary>
-        /// <returns></returns>
-        public async Task DownloadDirectoryAsync()
+        /// <param name="downloadPath">Where to download the directory to</param>
+        /// <returns>This method returns a Task, meaning it's awaitable</returns>
+        public async Task DownloadDirectoryAsync(string downloadPath, string apiUrl = null!)
         {
-            await DownloadDirectoryContentAsync($"{_apiUrl}/{_directoryPath}", _downloadDirectory);
-            await Task.WhenAll(_downloadTasks);
-            await Task.WhenAll(_subfolderTasks);
-        }
+            // Construct the API url
+            apiUrl = apiUrl ?? $"https://api.github.com/repos/{_repositoryOwner}/{_repositoryName}/contents/{_folderPath}";
 
-        /// <summary>
-        /// Downloads the directory content asynchronously.
-        /// </summary>
-        /// <param name="apiUrl">GitHub API apiUrl</param>
-        /// <param name="directoryPath"></param>
-        /// <param name="downloadDirectory"></param>
-        /// <returns></returns>
-        public async Task DownloadDirectoryContentAsync(string apiUrl, string downloadDirectory)
-        {
-            try
+            HttpResponseMessage response = await _httpClient.GetAsync(apiUrl);
+
+            if (response.IsSuccessStatusCode)
             {
-                string repoContentsUrl = apiUrl.TrimEnd('/');
+                string json = await response.Content.ReadAsStringAsync();
+                GitHubContent[] contents = JsonSerializer.Deserialize<GitHubContent[]>(json) ?? Array.Empty<GitHubContent>();
 
-                GitHubContent[] directoryContents = await GetDirectoryContentsAsync(repoContentsUrl) ?? Array.Empty<GitHubContent>();
-
-                if (!Directory.Exists(downloadDirectory))
+                if (!Directory.Exists(downloadPath))
                 {
-                    Directory.CreateDirectory(downloadDirectory);
+                    Directory.CreateDirectory(downloadPath);
                 }
 
-                foreach (GitHubContent item in directoryContents)
+                lock (_lockTotalSize)
+                {
+                    _totalFileSize += contents.Sum(content => content.Size ?? 0);
+                }
+
+                foreach (GitHubContent item in contents)
                 {
                     switch (item.Type)
                     {
                         case "file":
                             string downloadUrl = item.DownloadUrl!;
-                            string localFilePath = Path.Combine(downloadDirectory, item.Name!);
+                            string localFilePath = Path.Combine(downloadPath, item.Name!);
 
-                            _downloadTasks.Add(DownloadFileAsync(downloadUrl!, localFilePath));
-                            await Task.Delay(500);
+                            lock (_lockDownloadTasks)
+                            {
+                                _downloadTasks.Add(DownloadFileAsync(downloadUrl!, localFilePath));
+                            }
                             break;
                         case "dir":
                             string subFolderPath = item.Path!;
-                            string subfolderDownloadDirectory = Path.Combine(downloadDirectory, item.Name!);
+                            string subfolderDownloadDirectory = Path.Combine(downloadPath, item.Name!);
 
-                            _subfolderTasks.Add(DownloadDirectoryContentAsync(apiUrl.Replace(_directoryPath, subFolderPath), subfolderDownloadDirectory));
-                            await Task.Delay(500);
+                            lock (_subfolderTasks)
+                            {
+                                _subfolderTasks.Add(DownloadDirectoryAsync(subfolderDownloadDirectory, apiUrl.Replace(_folderPath, subFolderPath)));
+                            }
                             break;
                     }
-
-                    OnProgressChanged((int)((double)Array.IndexOf(directoryContents, item) / directoryContents.Length * 100));
                 }
+
+                Debug.WriteLine("waiting for tasks to complete");
+                await Task.WhenAll(_downloadTasks);
+                await Task.WhenAll(_subfolderTasks);
             }
-            catch (Exception)
+            else
             {
-
+                OnDownloadChanged(false);
+                Dispose();
             }
-        }
-
-        /// <summary>
-        /// Gets the contents of a directory from the GitHub repository.
-        /// </summary>
-        /// <param name="apiUrl">The URL of the directory contents in the GitHub repository.</param>
-        /// <returns>An array of GitHubContent objects representing directory items.</returns>
-        private async Task<GitHubContent[]> GetDirectoryContentsAsync(string apiUrl)
-        {
-            HttpResponseMessage response = await _httpClient.GetAsync(apiUrl);
-            response.EnsureSuccessStatusCode();
-
-            string content = await response.Content.ReadAsStringAsync();
-            GitHubContent[] directoryContents = JsonSerializer.Deserialize<GitHubContent[]>(content) ?? Array.Empty<GitHubContent>();
-
-            return directoryContents;
         }
 
         /// <summary>
@@ -117,26 +110,48 @@ namespace Github_Directory_Downloader
         /// <param name="filePath">The local file path where the downloaded file will be saved.</param>
         private async Task DownloadFileAsync(string downloadUrl, string filePath)
         {
-            using HttpResponseMessage response = await _httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+            try
+            {
+                using HttpResponseMessage response = await _httpClient.GetAsync(downloadUrl);
 
-            if (response.IsSuccessStatusCode)
-            {
-                using FileStream fileStream = File.Create(filePath);
-                await response.Content.CopyToAsync(fileStream);
+                if (response.IsSuccessStatusCode)
+                {
+                    using FileStream fileStream = File.Create(filePath);
+                    await response.Content.CopyToAsync(fileStream);
+
+                    lock (_lockDownloadedSize)
+                    {
+                        _downloadedFileSize += fileStream.Length;
+                        OnProgressChanged(new ProgressEventArgs((int)(((double)_downloadedFileSize / _totalFileSize) * 100)));
+                    }
+                }
+                else
+                {
+                    Debug.WriteLine($"Failed to download a file: {response.Content}");
+                }
             }
-            else
+            catch (Exception)
             {
-                Debug.WriteLine($"Failed to download a file: {response.Content}");
+                OnDownloadChanged(false);
+                Dispose();
             }
         }
 
         /// <summary>
         /// Raises the ProgressChanged event.
         /// </summary>
-        /// <param name="progress">The current progress value (0-100).</param>
-        protected virtual void OnProgressChanged(int progress)
+        /// <param name="e">An instance of ProgressEventArgs, can hold Progress as an int (0-100).</param>
+        protected virtual void OnProgressChanged(ProgressEventArgs e)
         {
-            ProgressChanged?.Invoke(this, progress);
+            ProgressUpdated?.Invoke(this, e);
+        }
+        /// <summary>
+        /// Raises the DownloadCompleted event.
+        /// </summary>
+        /// <param name="state"></param>
+        protected virtual void OnDownloadChanged(bool state)
+        {
+            DownloadCompleted?.Invoke(this, state);
         }
 
         /// <summary>
@@ -146,6 +161,25 @@ namespace Github_Directory_Downloader
         {
             _httpClient.Dispose();
             GC.SuppressFinalize(this);
+        }
+    }
+    /// <summary>
+    /// EventArgs for progress update
+    /// </summary>
+    public class ProgressEventArgs : EventArgs
+    {
+        /// <summary>
+        /// Progress 0-100%
+        /// </summary>
+        public int Progress { get; set; }
+        /// <summary>
+        /// Status, either good or bad
+        /// </summary>
+        public string Status { get; set; }
+        public ProgressEventArgs(int progress, string status = "default")
+        {
+            Progress = progress;
+            Status = status;
         }
     }
 }
