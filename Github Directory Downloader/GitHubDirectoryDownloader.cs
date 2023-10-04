@@ -16,8 +16,6 @@ namespace Github_Directory_Downloader
         private long _downloadedFileSize = 0;
         private object _lockTotalSize = new object();
         private object _lockDownloadedSize = new object();
-        private object _lockDownloadTasks = new object();
-        private object _lockSubfolderTasks = new object();
         private List<Task> _downloadTasks;
         private List<Task> _subfolderTasks;
         public event EventHandler<ProgressEventArgs>? ProgressUpdated;
@@ -40,12 +38,21 @@ namespace Github_Directory_Downloader
             _subfolderTasks = new List<Task>();
         }
 
+        public async Task DownloadDirectoryAsync(string downloadPath)
+        {
+            await StartDownloadAsync(downloadPath);
+            Debug.WriteLine("waiting for tasks to complete");
+            await Task.WhenAll(_downloadTasks);
+            await Task.WhenAll(_subfolderTasks);
+            OnDownloadChanged(true);
+        }
+
         /// <summary>
         /// Downloads a GitHub directory asynchronously
         /// </summary>
         /// <param name="downloadPath">Where to download the directory to</param>
         /// <returns>This method returns a Task, meaning it's awaitable</returns>
-        public async Task DownloadDirectoryAsync(string downloadPath, string apiUrl = null!)
+        private async Task StartDownloadAsync(string downloadPath, string apiUrl = null!)
         {
             // Construct the API url
             apiUrl = apiUrl ?? $"https://api.github.com/repos/{_repositoryOwner}/{_repositoryName}/contents/{_folderPath}";
@@ -75,7 +82,7 @@ namespace Github_Directory_Downloader
                             string downloadUrl = item.DownloadUrl!;
                             string localFilePath = Path.Combine(downloadPath, item.Name!);
 
-                            lock (_lockDownloadTasks)
+                            lock (_downloadTasks)
                             {
                                 _downloadTasks.Add(DownloadFileAsync(downloadUrl!, localFilePath));
                             }
@@ -86,15 +93,11 @@ namespace Github_Directory_Downloader
 
                             lock (_subfolderTasks)
                             {
-                                _subfolderTasks.Add(DownloadDirectoryAsync(subfolderDownloadDirectory, apiUrl.Replace(_folderPath, subFolderPath)));
+                                _subfolderTasks.Add(StartDownloadAsync(subfolderDownloadDirectory, apiUrl.Replace(_folderPath, subFolderPath)));
                             }
                             break;
                     }
                 }
-
-                Debug.WriteLine("waiting for tasks to complete");
-                await Task.WhenAll(_downloadTasks);
-                await Task.WhenAll(_subfolderTasks);
             }
             else
             {
